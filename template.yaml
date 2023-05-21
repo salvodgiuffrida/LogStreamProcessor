@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  python3.8
+
+  SAM Template for LogStreamProcessor
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 3
+
+Parameters:
+  EmailAddress:
+    Type: String
+    Description: Email address to receive SNS notifications
+  LogGroupName1:
+    Type: String
+    Description: Name of the first CloudWatch Log Group to subscribe to
+  LogGroupName2:
+    Type: String
+    Description: Name of the second CloudWatch Log Group to subscribe to
+  MatchPattern:
+    Type: String
+    Description: Pattern to match in the log streams
+
+Resources:
+  LogStreamProcessorFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: logstreamprocessor/
+      Handler: app.lambda_handler
+      Runtime: python3.8
+      MemorySize: 128
+      Timeout: 60
+      Role: !GetAtt LogStreamProcessorRole.Arn
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref LogStreamProcessorSNSTopic
+      Events:
+        ErrorLine1:
+          Type: CloudWatchLogs
+          Properties:
+            LogGroupName: !Ref LogGroupName1
+            FilterPattern: !Ref MatchPattern
+        ErrorLine2:
+          Type: CloudWatchLogs
+          Properties:
+            LogGroupName: !Ref LogGroupName2
+            FilterPattern: !Ref MatchPattern
+
+  LogMessagesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: log_messages
+      AttributeDefinitions:
+        - AttributeName: message
+          AttributeType: S
+      KeySchema:
+        - AttributeName: message
+          KeyType: HASH
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+#        TODO Add Autoscaling
+
+  LogStreamProcessorSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Log Processor SNS Topic
+      TopicName: !Sub "${AWS::StackName}-sns-topic-${EmailAddress}-${AWS::Region}"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref EmailAddress
+
+  LogStreamProcessorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource: !GetAtt LogMessagesTable.Arn
+        - PolicyName: SNSPublishAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref LogStreamProcessorSNSTopic
+        - PolicyName: CloudWatchLogsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+Outputs:
+  LogStreamProcessorFunction:
+    Description: "Log Processor Lambda Function ARN"
+    Value: !GetAtt LogStreamProcessorFunction.Arn
+
+  LogMessagesTable:
+    Description: "Log Messages DynamoDB Table ARN"
+    Value: !GetAtt LogMessagesTable.Arn
+
+  LogStreamProcessorSNSTopic:
+    Description: "Log Processor SNS Topic ARN"
+    Value: !Ref LogStreamProcessorSNSTopic
