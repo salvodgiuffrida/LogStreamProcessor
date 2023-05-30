@@ -26,13 +26,14 @@ def lambda_handler(event, context):
         table = dynamodb.Table('log_messages')
 
         messages = []
+        dedup_window_seconds = int(os.environ["DEDUP_WINDOW_SECONDS"])
+        is_rolling_window = bool(os.environ["IS_ROLLING_WINDOW"])
         for log_event in payload['logEvents']:
             message = log_event['message']
-            # TODO Make time period size configurable
             response = table.query(
                 KeyConditionExpression=Key('message').eq(message),
                 # Filter out messages that have been alerted in the last 24 hours, 'last_alerted_time' is an integer
-                FilterExpression=Attr('last_alerted_time').gt(int(time.time()) - 86400)
+                FilterExpression=Attr('last_alerted_time').gt(int(time.time()) - dedup_window_seconds)
             )
             if response['Count'] == 0:
                 logging.info(f'New message \'{message}\'')
@@ -45,13 +46,14 @@ def lambda_handler(event, context):
                     }
                 )
             else:
-                logging.info(f'Message \'{message}\' already alerted, skipping it')
-                # Update last alerted time in DynamoDB
-                table.update_item(
-                    Key={'message': message},
-                    UpdateExpression='SET last_alerted_time = :t',
-                    ExpressionAttributeValues={':t': int(time.time())}
-                )
+                logging.info(f'Message \'{message}\' already alerted in the last ${dedup_window_seconds} seconds, skipping it')
+                if is_rolling_window:
+                    # Update last alerted time in DynamoDB
+                    table.update_item(
+                        Key={'message': message},
+                        UpdateExpression='SET last_alerted_time = :t',
+                        ExpressionAttributeValues={':t': int(time.time())}
+                    )
 
         if messages:
             # Send SNS notification for new error messages

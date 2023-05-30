@@ -10,6 +10,7 @@ Globals:
   Function:
     Timeout: 3
 
+# TODO Replace 2 log groups with a list of log groups
 Parameters:
   EmailAddress:
     Type: String
@@ -23,9 +24,16 @@ Parameters:
   MatchPattern:
     Type: String
     Description: Pattern to match in the log streams
+  DedupWindowSeconds:
+    Type: Number
+    Description: Size of the sliding window in seconds
+  IsRollingWindow:
+    Type: String
+    Description: Whether to roll the dedup window each time a new message is received
 
 Resources:
   LogStreamProcessorFunction:
+#    TODO Use arm64 architecture
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
       CodeUri: logstreamprocessor/
@@ -37,6 +45,8 @@ Resources:
       Environment:
         Variables:
           SNS_TOPIC_ARN: !Ref LogStreamProcessorSNSTopic
+          DEDUP_WINDOW_SECONDS: !Ref DedupWindowSeconds
+          IS_ROLLING_WINDOW: !Ref IsRollingWindow
       Events:
         ErrorLine1:
           Type: CloudWatchLogs
@@ -68,8 +78,8 @@ Resources:
   LogStreamProcessorSNSTopic:
     Type: AWS::SNS::Topic
     Properties:
-      DisplayName: Log Processor SNS Topic
-      TopicName: !Sub "${AWS::StackName}-sns-topic-${EmailAddress}-${AWS::Region}"
+      TopicName: !Sub "${AWS::StackName}-sns-topic"
+      DisplayName: LogStreamProcessor SNS Topic
       Subscription:
         - Protocol: email
           Endpoint: !Ref EmailAddress

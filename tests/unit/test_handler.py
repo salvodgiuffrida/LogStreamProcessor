@@ -21,7 +21,9 @@ def event():
 
 class TestLambdaHandler(unittest.TestCase):
 
-    @patch.dict(os.environ, {'SNS_TOPIC_ARN': 'test-sns-topic-arn'})
+    @patch.dict(os.environ, {'SNS_TOPIC_ARN': 'test-sns-topic-arn',
+                             'DEDUP_WINDOW_SECONDS': "600",
+                             'IS_ROLLING_WINDOW': "false"})
     @patch('boto3.client')
     @patch('boto3.resource')
     @patch('time.time', return_value=1620583500)
@@ -51,11 +53,13 @@ class TestLambdaHandler(unittest.TestCase):
         table.put_item.assert_any_call(
             Item={'message': '[ERROR] Second test message', 'last_alerted_time': 1620583500})
 
-    @patch.dict(os.environ, {'SNS_TOPIC_ARN': 'test-sns-topic-arn'})
+    @patch.dict(os.environ, {'SNS_TOPIC_ARN': 'test-sns-topic-arn',
+                             'DEDUP_WINDOW_SECONDS': "600",
+                             'IS_ROLLING_WINDOW': "false"})
     @patch('boto3.client')
     @patch('boto3.resource')
     @patch('time.time', return_value=1620583500)
-    def test_lambda_handler_message_already_exists(self, mock_time, mock_dynamodb_resource, mock_sns_client):
+    def test_lambda_handler_message_already_exists_and_no_rolling_window(self, mock_time, mock_dynamodb_resource, mock_sns_client):
         # TODO Write additional tests using local DynamoDB instance instead of mock, if possible
         table = MagicMock()
         mock_dynamodb_resource.return_value.Table.return_value = table
@@ -73,8 +77,45 @@ class TestLambdaHandler(unittest.TestCase):
         # assert that no SNS message was published
         mock_sns_client.assert_not_called()
 
+    @patch.dict(os.environ, {'SNS_TOPIC_ARN': 'test-sns-topic-arn',
+                             'DEDUP_WINDOW_SECONDS': "600",
+                             'IS_ROLLING_WINDOW': "true"})
+    @patch('boto3.client')
+    @patch('boto3.resource')
+    @patch('time.time', return_value=1620583500)
+    def test_lambda_handler_message_already_exists_and_rolling_window(self, mock_time, mock_dynamodb_resource, mock_sns_client):
+        table = MagicMock()
+        mock_dynamodb_resource.return_value.Table.return_value = table
+        table.query.return_value = {'Count': 1}
+
+        response = lambda_handler(event(), context())
+
+        # assert that the response is correct
+        self.assertEqual(response['statusCode'], 200)
+        self.assertEqual(response['body'], f'Log stream event processed.')
+
+        # assert that a new message was not added to DynamoDB table
+        table.put_item.assert_not_called()
+
+        # assert that the existing message's last_alerted_time was updated
+        table.update_item.assert_any_call(
+            Key={'message': '[ERROR] First test message'},
+            UpdateExpression='SET last_alerted_time = :t',
+            ExpressionAttributeValues={':t': 1620583500}
+        )
+        table.update_item.assert_any_call(
+            Key={'message': '[ERROR] Second test message'},
+            UpdateExpression='SET last_alerted_time = :t',
+            ExpressionAttributeValues={':t': 1620583500}
+        )
+
+        # assert that no SNS message was published
+        mock_sns_client.assert_not_called()
+
     # Test what happens when Dynamo throws an exception
-    @patch.dict(os.environ, {'SNS_TOPIC_ARN': 'test-sns-topic-arn'})
+    @patch.dict(os.environ, {'SNS_TOPIC_ARN': 'test-sns-topic-arn',
+                             'DEDUP_WINDOW_SECONDS': "600",
+                             'IS_ROLLING_WINDOW': "false"})
     @patch('boto3.client')
     @patch('boto3.resource')
     @patch('time.time', return_value=1620583500)
