@@ -33,12 +33,13 @@ Parameters:
 
 Resources:
   LogStreamProcessorFunction:
-#    TODO Use arm64 architecture
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
       CodeUri: logstreamprocessor/
       Handler: app.lambda_handler
       Runtime: python3.8
+      Architectures:
+        - arm64
       MemorySize: 128
       Timeout: 60
       Role: !GetAtt LogStreamProcessorRole.Arn
@@ -71,9 +72,82 @@ Resources:
           KeyType: HASH
       BillingMode: PROVISIONED
       ProvisionedThroughput:
-        ReadCapacityUnits: 5
-        WriteCapacityUnits: 5
-#        TODO Add Autoscaling
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+
+  DynamoDBAutoscaleRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-DynamoDBAutoscaleRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: application-autoscaling.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: DynamoDBAutoscalePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:DescribeTable"
+                  - "dynamodb:UpdateTable"
+                  - "cloudwatch:PutMetricAlarm"
+                  - "cloudwatch:DescribeAlarms"
+                  - "cloudwatch:DeleteAlarms"
+                  - "cloudwatch:GetMetricStatistics"
+                  - "cloudwatch:SetAlarmState"
+                  - "sns:Publish"
+                Resource: "*"
+
+  LogMessagesTableReadScalingTarget:
+    Type: "AWS::ApplicationAutoScaling::ScalableTarget"
+    Properties:
+      MaxCapacity: 10
+      MinCapacity: 1
+      ResourceId: !Sub "table/${LogMessagesTable}"
+      RoleARN: !GetAtt DynamoDBAutoscaleRole.Arn
+      ScalableDimension: "dynamodb:table:ReadCapacityUnits"
+      ServiceNamespace: "dynamodb"
+
+  LogMessagesTableReadScalingPolicy:
+    Type: "AWS::ApplicationAutoScaling::ScalingPolicy"
+    Properties:
+      PolicyName: "LogMessagesTableScalingPolicy"
+      PolicyType: "TargetTrackingScaling"
+      ScalingTargetId: !Ref LogMessagesTableReadScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 70
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "DynamoDBReadCapacityUtilization"
+
+  LogMessagesTableWriteScalingTarget:
+    Type: "AWS::ApplicationAutoScaling::ScalableTarget"
+    Properties:
+      MaxCapacity: 10
+      MinCapacity: 1
+      ResourceId: !Sub "table/${LogMessagesTable}"
+      RoleARN: !GetAtt DynamoDBAutoscaleRole.Arn
+      ScalableDimension: "dynamodb:table:WriteCapacityUnits"
+      ServiceNamespace: "dynamodb"
+
+  LogMessagesTableWriteScalingPolicy:
+    Type: "AWS::ApplicationAutoScaling::ScalingPolicy"
+    Properties:
+      PolicyName: "LogMessagesTableScalingPolicy"
+      PolicyType: "TargetTrackingScaling"
+      ScalingTargetId: !Ref LogMessagesTableWriteScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 70
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "DynamoDBWriteCapacityUtilization"
 
   LogStreamProcessorSNSTopic:
     Type: AWS::SNS::Topic

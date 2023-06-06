@@ -1,9 +1,10 @@
 # LogStreamProcessor
-An AWS application, written in Python, that notifies by e-mail when a specified pattern (e.g. ERROR) is found in the log stream of the 2 specified log groups.
-Addresses the limitations of CloudWatch alerts notifications, that don't contain any detail on what triggered the alert.
+An AWS Lambda application, written in Python, that notifies by e-mail when a specified pattern (e.g. ERROR) is found in one of the log stream of the 2 specified log groups.
+Addresses the limitations of CloudWatch alerts notifications, that don't contain any detail about what triggered the alert.
 
-To avoid spamming with e-mails for the same pattern, the application used a DynamoDB table to deduplicate the notifications and avoid duplicate e-mails for the same pattern.
-If the same pattern is not seen for at least 24 hours, the application will send a new e-mail notification.
+To avoid spamming with e-mails for the same pattern, the application used a DynamoDB table to deduplicate the notifications and avoid duplicate e-mails for the same pattern over a certain period of time.
+The dedup behavior can be configured through some parameters specified at stack creation:
+- DedupWindowSeconds: The number of seconds for which the deduplication should be active. After this time, the same pattern will trigger a new notification.
 
 The application is deployed using AWS SAM (Serverless Application Model) and uses the following AWS services:
 - Lambda
